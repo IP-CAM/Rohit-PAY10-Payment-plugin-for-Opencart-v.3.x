@@ -33,14 +33,23 @@ class ControllerExtensionPaymentPayTen extends Controller
 
         $order_info = $this->model_checkout_order->getOrder($this->session->data['order_id']);
 
-        $return_url = $this->url->link('extension/payment/payten/callback', 'language=' . $this->config->get('config_language') . '&hash=' . md5($order_info['order_id'] . $order_info['total'] . $order_info['currency_code'] . $this->config->get('payment_payten_salt')));
+        //$return_url = $this->url->link('extension/payment/payten/callback', 'language=' . $this->config->get('config_language') . '&hash=' . md5($order_info['order_id'] . $order_info['total'] . $order_info['currency_code'] . $this->config->get('payment_payten_salt')));
+
+        $return_url = $this->url->link('extension/payment/payten/callback');
+
+        //Extract salt and merchant hosted key
+        $salt=$this->config->get('payment_payten_salt');
+        $key_data=explode("|",$salt);
+        $salt= $key_data[0];
+        $merchant_hosted_key= $key_data[1];
+        //Extract salt and merchant hosted key
 
         $transaction_request = new PTPGModule();
 
         /* Setting all values here */
         $transaction_request->setPayId($this->config->get('payment_payten_pay_id'));
         $transaction_request->setPgRequestUrl($data['action']);
-        $transaction_request->setSalt($this->config->get('payment_payten_salt'));
+        $transaction_request->setSalt($salt);
         $transaction_request->setReturnUrl($return_url);
         $transaction_request->setCurrencyCode(356);
         $transaction_request->setTxnType('SALE');
@@ -72,6 +81,23 @@ class ControllerExtensionPaymentPayTen extends Controller
 
     public function callback()
     {
+        require_once(DIR_SYSTEM . 'ptpg_helper.php');
+        $transaction_request = new PTPGModule();
+
+        //Extract salt and merchant hosted key
+            $salt=$this->config->get('payment_payten_salt');
+            $key_data=explode("|",$salt);
+            $salt= $key_data[0];
+            $merchant_hosted_key= $key_data[1];
+        //Extract salt and merchant hosted key
+
+        $transaction_request->setSalt($salt);
+        $transaction_request->setMerchantHostedKey($merchant_hosted_key);
+        $string =  $transaction_request->aes_decryption($_POST['ENCDATA']);
+        $_POST=$transaction_request->split_decrypt_string($string);
+        //print_r($_POST);exit;
+
+
         $this->load->language('extension/payment/payten');
 
         if (isset($this->request->post['ORDER_ID'])) {
@@ -84,21 +110,28 @@ class ControllerExtensionPaymentPayTen extends Controller
 
         $order_info = $this->model_checkout_order->getOrder($order_id);
 
-        if ($order_info) {
-            $error = '';
-
-            if (!isset($this->request->post['RESPONSE_CODE']) || !isset($this->request->get['hash'])) {
-                $error = $this->language->get('text_unable');
-            } elseif ($this->request->post['STATUS'] != 'Captured') {
-                $error = $this->language->get('text_declined');
-            } elseif ($this->request->get['hash'] != md5($order_info['order_id'] . $order_info['total'] . $order_info['currency_code'] . $this->config->get('payment_payten_salt'))) {
-                $error = $this->language->get('text_unable');
+         if($_POST['RESPONSE_MESSAGE'] == 'Cancelled by user'){
+            return $this->response->redirect($this->url->link('checkout/cart', 'language=' . $this->config->get('config_language')));
             }
+
+          if (isset($_POST['ORDER_ID'])) {
+            $order_id = $_POST['ORDER_ID'];
         } else {
-            $error = $this->language->get('text_unable');
+            $order_id = 0;
         }
 
-        if ($error) {
+        if ($order_info) {
+            $error = '';
+            if($_POST['STATUS'] != 'Captured'){
+               $error = $this->language->get('text_unable');
+               $data['msg']=$_POST['RESPONSE_MESSAGE'];
+            }
+            elseif($_POST['RESPONSE_MESSAGE'] == 'Cancelled by user'){
+            return $this->response->redirect($this->url->link('checkout/cart', 'language=' . $this->config->get('config_language')));
+            }
+        }
+
+      if ($error) {
             $data['breadcrumbs'] = array();
 
             $data['breadcrumbs'][] = array(
@@ -134,9 +167,14 @@ class ControllerExtensionPaymentPayTen extends Controller
 
             $this->response->setOutput($this->load->view('common/success', $data));
         } else {
-            $this->model_checkout_order->addOrderHistory($order_id, $this->config->get('payment_payten_order_status_id'));
-
-            $this->response->redirect($this->url->link('checkout/success', 'language=' . $this->config->get('config_language')));
+            if($_POST['STATUS'] == 'Captured'){
+              $this->model_checkout_order->addOrderHistory($_POST['ORDER_ID'], $this->config->get('payment_payten_order_status_id'));
+              $this->response->redirect($this->url->link('checkout/success', 'language=' . $this->config->get('config_language')));
+            }
+            else{
+             return $this->response->redirect($this->url->link('checkout/cart', 'language=' . $this->config->get('config_language')));
+            }
+            
         }
     }
 }
