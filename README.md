@@ -15,5 +15,6 @@ Add your PAY10 Key Id
 Add your PAY10 Key Secret
 Add your merchant hosted key
 eg. salt|merchant_hosted_key in the salt field
+
 Change plugin status to Enabled
 Save the plugin settings
